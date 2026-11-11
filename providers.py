@@ -1,27 +1,43 @@
 """Bốn provider cùng một interface. Không chứa agent loop."""
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
+OPENAI_BASE = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1').rstrip('/')
+
 CONFIG = {
-    'openai': ('OPENAI_API_KEY', 'https://api.openai.com/v1/chat/completions'),
+    'openai': ('OPENAI_API_KEY', f'{OPENAI_BASE}/chat/completions'),
     'gemini': ('GEMINI_API_KEY', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'),
     'openrouter': ('OPENROUTER_API_KEY', 'https://openrouter.ai/api/v1/chat/completions'),
     'anthropic': ('ANTHROPIC_API_KEY', 'https://api.anthropic.com/v1/messages'),
 }
 
 
-def post_json(url, headers, payload):
+def post_json(url, headers, payload, attempts=3):
+    """POST JSON, retry có giới hạn khi upstream 429. Đọc Retry-After nếu có."""
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', **headers})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as exc:
-        # Do not print response bodies: they may contain account or request data.
-        raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt < attempts:
+                raw = exc.headers.get('Retry-After') if exc.headers else None
+                try:
+                    wait = float(raw)
+                except (TypeError, ValueError):
+                    wait = 2 ** attempt
+                time.sleep(min(wait, 30))
+                continue
+            # Do not print response bodies: they may contain account or request data.
+            raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
+        except urllib.error.URLError as exc:
+            if attempt < attempts:
+                time.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
 
 
 class Provider:
