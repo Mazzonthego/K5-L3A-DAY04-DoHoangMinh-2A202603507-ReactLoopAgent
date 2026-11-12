@@ -1,6 +1,8 @@
 # Ghi chú phân tích · Day 04
 
-Đỗ Hoàng Minh · MSSV 2A202603507
+Đỗ Hoàng Minh 
+
+Mã học viên 2A202603507
 
 ## 1. Case được chọn
 
